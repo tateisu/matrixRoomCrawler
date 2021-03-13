@@ -9,9 +9,6 @@ botUser room-list-crawler
 botPassword XXXXXXXXXXXXXXXXXX
 botAccessToken XXXXXXXXXXXXXXXXXXXXXXX
 
-;; space separated room list to join
-joinRooms #roomListCrawler:matrix.juggler.jp #srad:matrix.juggler.jp
-
 ;; server matrix.org
 server matrix.juggler.jp
 server matrix.fedibird.com

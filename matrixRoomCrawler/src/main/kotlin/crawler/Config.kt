@@ -17,7 +17,6 @@ class Config(
     var botPassword: String = "(not specified)",
 
     var botAccessToken :String ="",
-    var joinRooms: String = "",
 
     var cacheExpireHours: Int = 1,
     var httpTimeoutMs: Long = 30000,
@@ -49,7 +48,6 @@ fun parseConfig(filePath: String): Config {
             "botUser" -> dst.botUser = value
             "botPassword" -> dst.botPassword = value
             "botAccessToken"-> dst.botAccessToken = value
-            "joinRooms" -> dst.joinRooms = value
             "cacheExpireHours" -> dst.cacheExpireHours = value.toInt()
             "httpTimeoutMs" -> dst.httpTimeoutMs = value.toLong()
             "cacheDir" -> dst.cacheDir = value

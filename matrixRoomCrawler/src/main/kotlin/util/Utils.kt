@@ -184,14 +184,14 @@ fun clearCache(cacheDir:File){
 
 private val cacheExpire  by lazy{ config.cacheExpireHours.toLong() * 3600000L }
 
-suspend fun HttpClient.cachedGetBytes(cacheDir:File,url: String, headers: Map<String, String> = HashMap()): ByteArray {
+suspend fun HttpClient.cachedGetBytes(cacheDir:File,url: String, headers: Map<String, String> = HashMap(),silent:Boolean =false): ByteArray {
 	val cacheFile = File(cacheDir,  url.hideAccessToken().sanitizeFileChars())
 	if (System.currentTimeMillis() - cacheFile.lastModified() <= cacheExpire) {
-		println("GET(cached) $url")
+		if(!silent) println("GET(cached) $url")
 		return loadFile(cacheFile)
 	}
 
-	showUrl(HttpMethod.Get,url)
+	if(!silent) showUrl(HttpMethod.Get,url)
 
 	return get<HttpResponse>(url) {
 		headers.entries.forEach {
