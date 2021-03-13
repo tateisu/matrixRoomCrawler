@@ -148,6 +148,42 @@ class Main(
         }
     }
 
+
+    val cachePublicRooms = HashMap<String,List<JsonObject>>()
+
+    suspend fun getPublicRooms(site:String) :List<JsonObject>{
+        var list = cachePublicRooms[site]
+        if(list==null) {
+            list = ArrayList()
+            cachePublicRooms[site] = list
+            // pagination token
+            var pageToken = ""
+            while (true) {
+                val params = jsonObject("server" to site, "limit" to 3000)
+                if (pageToken.isNotEmpty()) params["since"] = pageToken
+
+                val root = try{
+                    matrixApi(HttpMethod.Get, "/publicRooms", params)
+                }catch(ex:Throwable){
+                    if(ex.message?.startsWith("get failed. ")==true){
+                        println(ex.message)
+                        break
+                    }
+                    throw ex
+                }
+
+                if(pageToken.isEmpty())
+                    println("$site total_room_count_estimate=${root.long("total_room_count_estimate")}")
+
+                val chunk = root.jsonArray("chunk")!!.objectList()
+                println("$site list.size=${chunk.size}")
+                list.addAll(chunk)
+                pageToken = root.string("next_batch").notEmpty() ?: break
+            }
+        }
+        return list
+    }
+
     suspend fun run() {
         // アクセストークンがなければログインする
         if (botAccessToken.isEmpty()) {
@@ -166,25 +202,34 @@ class Main(
 
         // 指定されたサーバリストを順に
         for (server in config.servers) {
-            // pagination token
-            var pageToken = ""
-            while (true) {
-                val params = jsonObject("server" to server, "limit" to 3000)
-                if (pageToken.isNotEmpty()) params["since"] = pageToken
-                val root = matrixApi(HttpMethod.Get, "/publicRooms", params)
-                println("$server total_room_count_estimate=${root.long("total_room_count_estimate")}")
-                val list = root.jsonArray("chunk")!!.objectList()
-                println("$server list.size=${list.size}")
-                for (item in list) {
-                    val roomId = item.string("room_id")?.notEmpty() ?: continue
-                    var map2 = roomsMap[roomId]
-                    if (map2 == null) {
-                        map2 = HashMap()
-                        roomsMap[roomId] = map2
-                    }
-                    map2[server] = item
+            for( item in getPublicRooms(server)) {
+                val roomId = item.string("room_id")?.notEmpty() ?: continue
+                var map2 = roomsMap[roomId]
+                if (map2 == null) {
+                    map2 = HashMap()
+                    roomsMap[roomId] = map2
                 }
-                pageToken = root.string("next_batch").notEmpty() ?: break
+                map2[server] = item
+            }
+        }
+
+        // 指定されたルームリストを順に
+        val reRoom = """\A#([^#:!@]+):([^:]+)""".toRegex()
+        for( roomSpec in config.rooms){
+            val gr = reRoom.find(roomSpec)?.groupValues ?: error("can't find room $roomSpec")
+            val name = gr[1]
+            val site = gr[2]
+            for( item in getPublicRooms(site)) {
+                val roomId = item.string("room_id")?.notEmpty() ?: continue
+                val roomName = item.string("canonical_alias") ?: continue
+                if( roomName != roomSpec) continue
+                println("found $roomName!")
+                var map2 = roomsMap[roomId]
+                if (map2 == null) {
+                    map2 = HashMap()
+                    roomsMap[roomId] = map2
+                }
+                map2[site] = item
             }
         }
 

@@ -24,6 +24,7 @@ class Config(
     var outputDir:String = "web/public",
 ){
     val servers = TreeSet<String>()
+    val rooms = TreeSet<String>()
 }
 
 fun parseConfig(filePath: String): Config {
@@ -53,6 +54,7 @@ fun parseConfig(filePath: String): Config {
             "cacheDir" -> dst.cacheDir = value
             "outputDir" -> dst.outputDir = value
             "server" -> dst.servers.add( value)
+            "room" -> dst.rooms.add( value)
             else -> error("unsupported config name: $name")
         }
     }

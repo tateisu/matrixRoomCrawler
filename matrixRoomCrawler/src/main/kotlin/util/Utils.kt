@@ -187,7 +187,7 @@ private val cacheExpire  by lazy{ config.cacheExpireHours.toLong() * 3600000L }
 suspend fun HttpClient.cachedGetBytes(cacheDir:File,url: String, headers: Map<String, String> = HashMap(),silent:Boolean =false): ByteArray {
 	val cacheFile = File(cacheDir,  url.hideAccessToken().sanitizeFileChars())
 	if (System.currentTimeMillis() - cacheFile.lastModified() <= cacheExpire) {
-		if(!silent) println("GET(cached) $url")
+		if(!silent) println("GET(cached) ${url.hideAccessToken()}")
 		return loadFile(cacheFile)
 	}
 
@@ -204,7 +204,7 @@ suspend fun HttpClient.cachedGetBytes(cacheDir:File,url: String, headers: Map<St
 					.also { saveFile(cacheFile, it) }
 			else -> {
 				cacheFile.delete()
-				error("get failed. $url ${res.status}")
+				error("get failed. ${url.hideAccessToken()} ${res.status}")
 			}
 		}
 	}
