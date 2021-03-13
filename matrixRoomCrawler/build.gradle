@@ -1,0 +1,69 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm' version '1.4.31'
+    id 'application'
+}
+
+group 'org.example'
+version '1.0-SNAPSHOT'
+
+repositories {
+    maven { url "https://kotlin.bintray.com/kotlinx" }
+    mavenCentral()
+    jcenter()
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib"
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.6.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+
+
+    def kotlin_version = "1.4.31"
+    implementation "org.jetbrains.kotlin:kotlin-util-io:$kotlin_version"
+    implementation "org.jetbrains.kotlin:kotlin-reflect:$kotlin_version"
+
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.4.2'
+    implementation "org.jetbrains.kotlinx:kotlinx-cli:0.3"
+
+    def ktor_version="1.5.0"
+    implementation "io.ktor:ktor-client-core:$ktor_version"
+    implementation "io.ktor:ktor-client-cio:$ktor_version"
+    implementation "io.ktor:ktor-client-features:$ktor_version"
+    implementation "io.ktor:ktor-client-encoding:$ktor_version"
+
+    // StringEscapeUtils.unescapeHtml4
+    implementation "org.apache.commons:commons-text:1.9"
+
+    // HTML5パーサ
+    implementation "org.jsoup:jsoup:1.13.1"
+}
+
+test {
+    useJUnitPlatform()
+}
+
+def nameMainClass = 'crawler.MainKt'
+
+application {
+    mainClassName = nameMainClass
+}
+
+task fatJar(type: Jar) {
+    archiveBaseName.set( "matrixRoomCrawler" )
+    // sources とかjavadocとか。実行バイナリだとセットしない？
+    // archiveClassifier.set('all')
+
+    from sourceSets.main.output
+    dependsOn configurations.runtimeClasspath
+    from {
+        configurations.runtimeClasspath.findAll { it.name.endsWith('jar') }.collect { zipTree(it) }
+        //   configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+    }{
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+    }
+    manifest {
+        attributes "Manifest-Version": "1.0", "Main-Class": nameMainClass
+    }
+}

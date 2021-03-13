@@ -1,0 +1,21 @@
+;; コメントは ;; です。 # は部屋名に使われます。 // はURLに使われます。
+
+verbose true
+userAgent Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.72 Safari/537.36
+botServerPrefix https://matrix.juggler.jp/_matrix/client/r0
+mediaPrefix https://matrix.juggler.jp/_matrix/media/r0/download/
+
+botUser room-list-crawler
+botPassword XXXXXXXXXXXXXXXXXX
+botAccessToken XXXXXXXXXXXXXXXXXXXXXXX
+
+;; space separated room list to join
+joinRooms #roomListCrawler:matrix.juggler.jp #srad:matrix.juggler.jp
+
+;; server matrix.org
+server matrix.juggler.jp
+server matrix.fedibird.com
+server matrix-jp.net
+server matrix.sabakan.industries
+server nibbana.jp
+server conventum.felesitas.cloud
