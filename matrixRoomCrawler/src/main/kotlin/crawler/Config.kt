@@ -22,6 +22,7 @@ class Config(
     var httpTimeoutMs: Long = 30000,
     var cacheDir :String = "cache",
     var outputDir:String = "web/public",
+    var dumpRooms:Boolean = false,
 ){
     val servers = TreeSet<String>()
     val rooms = TreeSet<String>()
@@ -55,6 +56,7 @@ fun parseConfig(filePath: String): Config {
             "outputDir" -> dst.outputDir = value
             "server" -> dst.servers.add( value)
             "room" -> dst.rooms.add( value)
+            "dumpRooms" -> dst.dumpRooms = value.isTruth()
             else -> error("unsupported config name: $name")
         }
     }

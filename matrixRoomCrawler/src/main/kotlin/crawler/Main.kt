@@ -21,8 +21,8 @@ val verbose by lazy { config.verbose }
 
 private val cacheDir by lazy { File("cache").apply { mkdirs() } }
 private val dataDir by lazy { File("web/public").apply { mkdirs() } }
-private val mediaDir by lazy { File(dataDir,"avatar").apply { mkdirs() } }
-private val dataFile by lazy { File(dataDir,"data.json")}
+private val mediaDir by lazy { File(dataDir, "avatar").apply { mkdirs() } }
+private val dataFile by lazy { File(dataDir, "data.json") }
 
 fun JsonObject.encodeQuery() =
     this.entries.sortedBy { it.key }
@@ -65,7 +65,8 @@ class Main(
 
         var url = "${config.botServerPrefix}$path"
 
-        if (botAccessToken.isNotEmpty()) url = "$url${if(url.indexOf("?")==-1) "?" else "&" }access_token=${botAccessToken.escapeUrl()}"
+        if (botAccessToken.isNotEmpty()) url =
+            "$url${if (url.indexOf("?") == -1) "?" else "&"}access_token=${botAccessToken.escapeUrl()}"
 
         lastContent = when (method) {
             HttpMethod.Get -> {
@@ -113,24 +114,24 @@ class Main(
         "horsein.space",
     )
 
-    private suspend fun getAvatarImage(item:JsonObject){
+    private suspend fun getAvatarImage(item: JsonObject) {
         val mxcPair = item.string("avatar_url")?.decodeMxcUrl()
             ?: return
-        val(site,code)=mxcPair
+        val (site, code) = mxcPair
 
-        if( ignoreServers.contains(site) ) return
+        if (ignoreServers.contains(site)) return
 
         item["avatarUrlHttp"] = "/avatar/${site}/${code}"
         val saveFile = File(File(mediaDir, site).also { it.mkdirs() }, code)
 
         // 変換済のファイルがあるなら何もしない
-        if( saveFile.exists()) return
+        if (saveFile.exists()) return
 
         val fromUrl = "${config.mediaPrefix}${site}/${code}"
 
         val bytes = try {
-            client.cachedGetBytes(cacheDir, fromUrl,silent = true)
-        }catch(ex:Throwable){
+            client.cachedGetBytes(cacheDir, fromUrl, silent = true)
+        } catch (ex: Throwable) {
             println(ex.message)
             return
         }
@@ -139,21 +140,22 @@ class Main(
             @Suppress("BlockingMethodInNonBlockingContext")
             ImageIO.read(it)
         }
-        if(image1 == null){
+        if (image1 == null) {
             println("$fromUrl ImageIO.read() returns null")
             // たぶんWebPかSVGなのでそのまま保存する
-            saveFile(saveFile,bytes)
-        }else{
+            saveFile(saveFile, bytes)
+        } else {
+            @Suppress("BlockingMethodInNonBlockingContext")
             ImageIO.write(image1.resize(64, 64), "png", saveFile)
         }
     }
 
 
-    private val cachePublicRooms = HashMap<String,List<JsonObject>>()
+    private val cachePublicRooms = HashMap<String, List<JsonObject>>()
 
-    private suspend fun getPublicRooms(site:String) :List<JsonObject>{
+    private suspend fun getPublicRooms(site: String): List<JsonObject> {
         var list = cachePublicRooms[site]
-        if(list==null) {
+        if (list == null) {
             list = ArrayList()
             cachePublicRooms[site] = list
             // pagination token
@@ -162,17 +164,17 @@ class Main(
                 val params = jsonObject("server" to site, "limit" to 3000)
                 if (pageToken.isNotEmpty()) params["since"] = pageToken
 
-                val root = try{
+                val root = try {
                     matrixApi(HttpMethod.Get, "/publicRooms", params)
-                }catch(ex:Throwable){
-                    if(ex.message?.startsWith("get failed. ")==true){
+                } catch (ex: Throwable) {
+                    if (ex.message?.startsWith("get failed. ") == true) {
                         println(ex.message)
                         break
                     }
                     throw ex
                 }
 
-                if(pageToken.isEmpty())
+                if (pageToken.isEmpty())
                     println("$site total_room_count_estimate=${root.long("total_room_count_estimate")}")
 
                 val chunk = root.jsonArray("chunk")!!.objectList()
@@ -199,7 +201,7 @@ class Main(
 
         // rooms[room_id][via_server] = jsonobject
         val roomsMap = HashMap<String, HashMap<String, JsonObject>>()
-        fun addRoom(room:JsonObject,viaServer:String){
+        fun addRoom(room: JsonObject, viaServer: String) {
             val roomId = room.string("room_id")
                 ?.notEmpty() ?: return
 
@@ -212,15 +214,15 @@ class Main(
         }
 
         // 指定されたサーバリストを順に
-        config.servers.forEach { server->
+        config.servers.forEach { server ->
             getPublicRooms(server).forEach {
-                addRoom(it,server)
+                addRoom(it, server)
             }
         }
 
         // 指定されたルームリストを順に
         val reRoom = """\A#([^#:!@]+):([^:]+)""".toRegex()
-        for( roomSpec in config.rooms){
+        for (roomSpec in config.rooms) {
             val gr = reRoom.find(roomSpec)?.groupValues ?: error("can't find room $roomSpec")
             val site = gr[2]
             val root = matrixApi(
@@ -231,12 +233,12 @@ class Main(
                     "filter" to jsonObject("generic_search_term" to roomSpec)
                 )
             )
-            val room = root.jsonArray("chunk")?.objectList()?.find{ it.string("canonical_alias")==roomSpec}
-            if( room == null){
+            val room = root.jsonArray("chunk")?.objectList()?.find { it.string("canonical_alias") == roomSpec }
+            if (room == null) {
                 println("room $roomSpec not found! $lastContent")
-            }else{
+            } else {
                 println("room $roomSpec found!")
-                addRoom(room,site)
+                addRoom(room, site)
             }
         }
 
@@ -247,15 +249,15 @@ class Main(
 
         // Webページでの表示に合わせた調整
         rooms.forEach { item ->
-            item["world_readable_int"] = if(item.boolean("world_readable")!!) 1 else 0
-            item["guest_can_join_int"] = if(item.boolean("guest_can_join")!!) 1 else 0
+            item["world_readable_int"] = if (item.boolean("world_readable")!!) 1 else 0
+            item["guest_can_join_int"] = if (item.boolean("guest_can_join")!!) 1 else 0
             getAvatarImage(item)
         }
 
-        if(false){
+        if (config.dumpRooms) {
             // コンソールに表示
             rooms.forEach { item ->
-                val avatar_url = item.string("avatarUrlHttp") ?: item.string("avatar_url")
+                val avatarUrl = item.string("avatarUrlHttp") ?: item.string("avatar_url")
 
                 val roomId = item.string("room_id")!!
                 val name = item.string("name")
@@ -271,12 +273,11 @@ class Main(
                 // guest_can_join	boolean	Required. Whether guest users may join the room and participate in item. If they can, they will be subject to ordinary power level rules like any other user.
                 val guestCanJoin = item.boolean("guest_can_join")
 
-                println("jm=$numJoinedMembers wr=$worldReadable gj=$guestCanJoin na=$name ca=$canonicalAlias id=$roomId to=$topic av=$avatar_url")
+                println("jm=$numJoinedMembers wr=$worldReadable gj=$guestCanJoin na=$name ca=$canonicalAlias id=$roomId to=$topic av=$avatarUrl")
             }
         }
 
-
-        saveFile(dataFile,JsonArray(rooms).toString().encodeUtf8())
+        saveFile(dataFile, JsonArray(rooms).toString().encodeUtf8())
     }
 }
 
@@ -300,18 +301,6 @@ fun main(args: Array<String>) {
             connectTimeoutMillis = t
             socketTimeoutMillis = t
         }
-//	install(HttpCookies) {
-//		// Will keep an in-memory map with all the cookies from previous requests.
-//		storage = AcceptAllCookiesStorage()
-//
-////		// Will ignore Set-Cookie and will send the specified cookies.
-////		storage = ConstantCookiesStorage(Cookie("cookie1", "value"), Cookie("cookie2", "value"))
-//	}
-
-//	install(ContentEncoding) {
-//		gzip()
-//		deflate()
-//	}
     }.use { client ->
         runBlocking {
             Main(client).run()
