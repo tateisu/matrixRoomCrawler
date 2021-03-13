@@ -65,7 +65,7 @@ class Main(
 
         var url = "${config.botServerPrefix}$path"
 
-        if (botAccessToken.isNotEmpty()) url = "$url?access_token=${botAccessToken.escapeUrl()}"
+        if (botAccessToken.isNotEmpty()) url = "$url${if(url.indexOf("?")==-1) "?" else "&" }access_token=${botAccessToken.escapeUrl()}"
 
         lastContent = when (method) {
             HttpMethod.Get -> {
@@ -149,9 +149,9 @@ class Main(
     }
 
 
-    val cachePublicRooms = HashMap<String,List<JsonObject>>()
+    private val cachePublicRooms = HashMap<String,List<JsonObject>>()
 
-    suspend fun getPublicRooms(site:String) :List<JsonObject>{
+    private suspend fun getPublicRooms(site:String) :List<JsonObject>{
         var list = cachePublicRooms[site]
         if(list==null) {
             list = ArrayList()
@@ -199,17 +199,22 @@ class Main(
 
         // rooms[room_id][via_server] = jsonobject
         val roomsMap = HashMap<String, HashMap<String, JsonObject>>()
+        fun addRoom(room:JsonObject,viaServer:String){
+            val roomId = room.string("room_id")
+                ?.notEmpty() ?: return
+
+            var map2 = roomsMap[roomId]
+            if (map2 == null) {
+                map2 = HashMap()
+                roomsMap[roomId] = map2
+            }
+            map2[viaServer] = room
+        }
 
         // 指定されたサーバリストを順に
-        for (server in config.servers) {
-            for( item in getPublicRooms(server)) {
-                val roomId = item.string("room_id")?.notEmpty() ?: continue
-                var map2 = roomsMap[roomId]
-                if (map2 == null) {
-                    map2 = HashMap()
-                    roomsMap[roomId] = map2
-                }
-                map2[server] = item
+        config.servers.forEach { server->
+            getPublicRooms(server).forEach {
+                addRoom(it,server)
             }
         }
 
@@ -217,19 +222,21 @@ class Main(
         val reRoom = """\A#([^#:!@]+):([^:]+)""".toRegex()
         for( roomSpec in config.rooms){
             val gr = reRoom.find(roomSpec)?.groupValues ?: error("can't find room $roomSpec")
-            val name = gr[1]
             val site = gr[2]
-            for( item in getPublicRooms(site)) {
-                val roomId = item.string("room_id")?.notEmpty() ?: continue
-                val roomName = item.string("canonical_alias") ?: continue
-                if( roomName != roomSpec) continue
-                println("found $roomName!")
-                var map2 = roomsMap[roomId]
-                if (map2 == null) {
-                    map2 = HashMap()
-                    roomsMap[roomId] = map2
-                }
-                map2[site] = item
+            val root = matrixApi(
+                HttpMethod.Post,
+                "/publicRooms?server=$site",
+                jsonObject(
+                    "limit" to 20,
+                    "filter" to jsonObject("generic_search_term" to roomSpec)
+                )
+            )
+            val room = root.jsonArray("chunk")?.objectList()?.find{ it.string("canonical_alias")==roomSpec}
+            if( room == null){
+                println("room $roomSpec not found! $lastContent")
+            }else{
+                println("room $roomSpec found!")
+                addRoom(room,site)
             }
         }
 
