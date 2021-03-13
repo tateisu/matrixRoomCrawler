@@ -15,11 +15,12 @@ class Config(
 
     var botUser: String = "(not specified)",
     var botPassword: String = "(not specified)",
+
     var botAccessToken :String ="",
-    var joinRooms: String = "(not specified)",
+    var joinRooms: String = "",
+
     var cacheExpireHours: Int = 1,
     var httpTimeoutMs: Long = 30000,
-
     var cacheDir :String = "cache",
     var outputDir:String = "web/public",
 ){
