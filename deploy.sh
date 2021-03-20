@@ -1,6 +1,9 @@
 #!/bin/bash --
 set -eux
 
+date=`date +"%Y/%m/%d %T"`
+echo "$date deploy start."
+
 cd web
 git pull
 cd ..
@@ -12,3 +15,5 @@ git add public/avatar/
 git commit -a -m "auto update"
 git push
 
+date=`date +"%Y/%m/%d %T"`
+echo "$date deploy end."
