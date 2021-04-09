@@ -4,6 +4,8 @@ set -eux
 date=`date +"%Y/%m/%d %T"`
 echo "$date deploy start."
 
+./roomSpeedBot.pl start
+
 cd web
 git pull
 cd ..

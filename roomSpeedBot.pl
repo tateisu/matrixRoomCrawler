@@ -13,6 +13,7 @@ use JSON::XS;
 use LWP::UserAgent;
 use Proc::Find qw( proc_exists );
 use URI::Escape;
+use IO::Handle;
 
 binmode $_,":utf8" for \*STDOUT,\*STDERR;
 
@@ -40,11 +41,11 @@ GetOptions(
 
 sub killDaemon($){
 	my($pid)=@_;
-	say "killing pid $pid …";
-	while(can_signal_process( $pid )){
-		last if not kill 'INT', $pid;
-		say "waiting end of process…";
-		sleep 3;
+	while( $pid ){
+		say "killing pid $pid …";
+		kill 'INT', $pid;
+		sleep 2;
+		$pid = check_pidfile( $pidFile );
 	}
 }
 
@@ -61,9 +62,15 @@ if( $action eq "stop"){
 	say "status: ",($pid ? "running. pid=$pid." : "not running.");
 	exit;
 }elsif( $action eq "start"){
-	$pid and die "daemon is already running.\n";
+	if($pid){
+		say "daemon is already running.\n";
+		exit;
+	}
 }elsif( $action eq "restart"){
-	$pid and killDaemon($pid);
+	if($pid){
+		killDaemon($pid);
+		sleep 2;
+	}
 }else{
 	die "unknown action $action\n";
 }
@@ -175,43 +182,17 @@ say "user_id=$myselfId";
 
 ######################################################################
 
-daemonize(
-	chdir=> $curDir,
-	close=>'std',
-	stdout => $outLogFile,
-	stderr => $errLogFile,
-);
-
-write_pidfile( $pidFile );
-$SIG{INT} = sub { delete_pidfile( $pidFile ) };
-
-binmode $_,":utf8" for \*STDOUT,\*STDERR;
+my $fhLog;
 
 sub logX{
 	my($lv)=shift;
 	my @lt = localtime;
 	$lt[5]+=1900;$lt[4]+=1;
-	print sprintf("%d%02d%02d-%02d%02d%02d $lv ",reverse @lt[0..5]),@_,"\n";
+	print $fhLog sprintf("%d%02d%02d-%02d%02d%02d $lv ",reverse @lt[0..5]),@_,"\n";
 }
 sub logI{ logX "INFO",@_;}
 sub logW{ logX "WARN",@_;}
 sub logE{ logX "ERROR",@_;}
-
-logI "daemonized!";
-
-######################################################################
-
-sub postMessage{
-     my($roomId,$text)=@_;
-     my $root = apiJson(
-         $methodPost,
-         "/rooms/".uri_escape($roomId)."/send/m.room.message",
-        {msgtype=>"m.text", body=>$text},
-     );
-     # {"event_id":"$X0Z0Yza9VSj2BaYXj9KCgn6WL6rPX6K52hK2orf60Nk"}
-}
-
-my $firstRequest = time;
 
 sub parseMessages($){
     my( $root ) = @_;
@@ -249,45 +230,82 @@ sub parseMessages($){
     }
 }
 
-# periodically sync
-my $nextBatch;
-my $lastRequest =0;
-while(1){
+my $signaled = 0;
+sub signalHandler{ 
+	my($sig) = @_;
+	$signaled = 1;
+	logE "signal $sig";
+	delete_pidfile( $pidFile );
+	exit 1;
+};
 
-    # 短時間に何度もAPIを呼び出さないようにする
-    my $now = time;
-    my $remain = $lastRequest + 3 - $now;
-    if( $remain >= 1 ){
-        sleep($remain);
-        next;
-    }
-    $lastRequest = $now;
+daemonize(
+	chdir=> $curDir,
+	close=>'std',
+	stderr => $errLogFile,
+	run => sub{
+		binmode $_,":utf8" for \*STDOUT,\*STDERR;
 
-    $root = eval{
-        # このAPI呼び出しはtimeoutまで待機しつつ、イベントが発生したらその時点で応答を返す
-        my $params = { timeout=>30000 };
-        if(!$nextBatch){
-            # first sync ( filtered)
-            $params->{filter}= encode_json( {room=>{timeline=>{limit=>1}}});
-        }else{
-            $params->{filter}=0;
-            $params->{since}=$nextBatch;
-        }
-        apiJson($methodGet,"/sync",$params);
-    };
+		if( not open($fhLog,">>:utf8",$outLogFile) ){
+			$fhLog = \*STDERR;
+			logE "$outLogFile $!";
+		}
+		$fhLog->autoflush(1);
 
-    my $error = $@;
-    if($error){
-        warn $error unless $error =~ /500 read timeout/;
-        next;
-    }
+		logI "daemonized! pid=$$";
 
-    my $sv = $root->{next_batch};
-    if($sv){
-        $nextBatch = $sv;
-    }else{
-        warn "missing nextBatch $lastJson";
-    }
+		write_pidfile( $pidFile );
 
-    parseMessages($root);
-}
+		$SIG{INT} = \&signalHandler;
+		$SIG{TERM} = \&signalHandler;
+
+		$0="roomSpeedBot daemonized";
+
+		my $firstRequest = time;
+
+		# periodically sync
+		my $nextBatch;
+		my $lastRequest =0;
+		while(not $signaled){
+
+		    # 短時間に何度もAPIを呼び出さないようにする
+		    my $now = time;
+		    my $remain = $lastRequest + 3 - $now;
+		    if( $remain >= 1 ){
+		        sleep($remain);
+		        next;
+		    }
+		    $lastRequest = $now;
+
+		    $root = eval{
+		        # このAPI呼び出しはtimeoutまで待機しつつ、イベントが発生したらその時点で応答を返す
+		        my $params = { timeout=>30000 };
+		        if(!$nextBatch){
+		            # first sync ( filtered)
+		            $params->{filter}= encode_json( {room=>{timeline=>{limit=>1}}});
+		        }else{
+		            $params->{filter}=0;
+		            $params->{since}=$nextBatch;
+		        }
+		        apiJson($methodGet,"/sync",$params);
+		    };
+
+		    my $error = $@;
+		    if($error){
+		        warn $error unless $error =~ /500 read timeout/;
+		        next;
+		    }
+
+		    my $sv = $root->{next_batch};
+		    if($sv){
+		        $nextBatch = $sv;
+		    }else{
+		        warn "missing nextBatch $lastJson";
+		    }
+
+		    parseMessages($root);
+		}
+		logI "loop exit.";
+	}
+);
+
