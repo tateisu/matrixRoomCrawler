@@ -2,3 +2,9 @@
 /web/
 config.txt
 copyJarToBaz.sh
+
+*.jar
+*~
+*.log
+*.env
+*.pid

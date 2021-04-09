@@ -10,6 +10,8 @@ cd ..
 
 java -jar ./matrixRoomCrawler.jar
 
+./roomSpeed.pl
+
 cd web
 git add public/avatar/
 git commit -a -m "auto update"
