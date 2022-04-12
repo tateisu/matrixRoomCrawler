@@ -1,35 +1,75 @@
+@file:Suppress("MemberVisibilityCanBePrivate")
+
 package crawler
 
-import io.ktor.client.*
-import io.ktor.client.features.*
-import io.ktor.client.request.*
-import io.ktor.client.statement.*
-import io.ktor.http.*
+import io.ktor.client.HttpClient
+import io.ktor.client.HttpClientConfig
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.UserAgent
+import io.ktor.client.request.forms.submitForm
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.request
+import io.ktor.client.request.setBody
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.runBlocking
-import util.*
+import util.JsonArray
+import util.JsonObject
+import util.cachedGetBytes
+import util.cachedGetString
+import util.decodeJsonObject
+import util.encodeUtf8
+import util.escapeUrl
+import util.getContentString
+import util.jsonObject
+import util.notEmpty
+import util.saveFile
+import util.showUrl
+import util.toJsonArray
 import java.awt.Image
-import java.io.File
-import javax.imageio.ImageIO
-
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
-
+import java.io.File
+import java.util.*
+import javax.imageio.ImageIO
+import kotlin.collections.set
 
 lateinit var config: Config
 
 val verbose by lazy { config.verbose }
+val cacheDir by lazy { File("cache").apply { mkdirs() } }
+val dataDir by lazy { File("web/public").apply { mkdirs() } }
+val mediaDir by lazy { File(dataDir, "avatar").apply { mkdirs() } }
+val dataFile by lazy { File(dataDir, "data.json") }
 
-private val cacheDir by lazy { File("cache").apply { mkdirs() } }
-private val dataDir by lazy { File("web/public").apply { mkdirs() } }
-private val mediaDir by lazy { File(dataDir, "avatar").apply { mkdirs() } }
-private val dataFile by lazy { File(dataDir, "data.json") }
+
+fun createHttpClient(block: HttpClientConfig<*>.() -> Unit = {}) =
+    HttpClient {
+        // エラーレスポンスで例外を出さない
+        expectSuccess = false
+
+        install(UserAgent) {
+            agent = config.userAgent
+        }
+
+        install(HttpTimeout) {
+            val t = config.httpTimeoutMs
+            requestTimeoutMillis = t
+            connectTimeoutMillis = t
+            socketTimeoutMillis = t
+        }
+
+        block()
+    }
 
 fun JsonObject.encodeQuery() =
     this.entries.sortedBy { it.key }
         .joinToString("&") { it.key.escapeUrl() + "=" + it.value.toString().escapeUrl() }
 
-
 val reMxcUrl = """\Amxc://([^/]+)/([^/?&#]+)""".toRegex()
+val reRoomServer = """:([^:]+)\z""".toRegex()
 
 fun String.decodeMxcUrl(): Pair<String, String>? {
     reMxcUrl.find(this)?.groupValues?.let { gr ->
@@ -46,39 +86,47 @@ fun BufferedImage.resize(w: Int, h: Int): BufferedImage =
             g2d.dispose()
         }
 
+val reRoomSpec = """\A#([^#:!@]+):([^:]+)""".toRegex()
 
 class Main(
-    private val client: HttpClient
+    val client: HttpClient,
+    val client2: HttpClient,
 ) {
     // アクセストークン。設定ファイルから供給されるか、ログインして得られるか
-    private var botAccessToken = config.botAccessToken
+    var botAccessToken = config.botAccessToken
 
     // matrixApiで最後に得た内容。JSONパース失敗時に使う
-    private var lastContent = ""
+    var lastContent = ""
 
     // matrixのAPIを呼び出す
-    private suspend fun matrixApi(
+    suspend fun matrixApi(
         method: HttpMethod,
         path: String,
-        form: JsonObject? = null
+        form: JsonObject? = null,
+        useAdminApi: Boolean = false,
     ): JsonObject {
+        var url = "${if (useAdminApi) config.adminApiPrefix else config.botServerPrefix}$path"
 
-        var url = "${config.botServerPrefix}$path"
+        val headers = HashMap<String, String>()
+        if (botAccessToken.isNotEmpty()) {
+            headers["Authorization"] = "Bearer $botAccessToken"
+        }
 
-        if (botAccessToken.isNotEmpty()) url =
-            "$url${if (url.indexOf("?") == -1) "?" else "&"}access_token=${botAccessToken.escapeUrl()}"
 
         lastContent = when (method) {
             HttpMethod.Get -> {
-                if (form != null) url = "$url${if (url.any { it == '?' }) "&" else "?"}${form.encodeQuery()}"
-                client.cachedGetString(cacheDir, url)
+                if (form?.isNotEmpty() == true)
+                    url = "$url${if (url.any { it == '?' }) "&" else "?"}${form.encodeQuery()}"
+                client.cachedGetString(cacheDir, url, headers)
             }
             HttpMethod.Post -> {
                 showUrl(method, url)
-                client.request<HttpResponse>(url) {
+                client.submitForm()
+                client.request(url) {
                     this.method = method
                     header("Content-Type", "application/json")
-                    this.body = form.toString().encodeUtf8()
+                    headers.entries.forEach { header(it.key, it.value) }
+                    setBody(form?.toString()?.encodeUtf8() ?: ByteArray(0))
                 }.getContentString()
             }
             else -> error("matrixApi: unsupported http method $method")
@@ -86,7 +134,7 @@ class Main(
         return lastContent.decodeJsonObject()
     }
 
-    private fun chooseRoomInfo(roomId: String, map2: HashMap<String, JsonObject>): JsonObject {
+    fun chooseRoomInfo(roomId: String, map2: HashMap<String, JsonObject>): JsonObject {
         if (map2.size == 1) return map2.values.first()
         val roomServer = """:([^:]+)\z""".toRegex().find(roomId)?.groupValues?.elementAtOrNull(1)
         if (roomServer != null) {
@@ -95,7 +143,7 @@ class Main(
         return map2.values.first()
     }
 
-    private val ignoreServers = setOf(
+    val ignoreServers = setOf(
         "bousse.fr",
         "chat.cryptochat.io",
         "disroot.org",
@@ -114,7 +162,7 @@ class Main(
         "horsein.space",
     )
 
-    private suspend fun getAvatarImage(item: JsonObject) {
+    suspend fun getAvatarImage(item: JsonObject) {
         val mxcPair = item.string("avatar_url")?.decodeMxcUrl()
             ?: return
         val (site, code) = mxcPair
@@ -151,9 +199,9 @@ class Main(
     }
 
 
-    private val cachePublicRooms = HashMap<String, List<JsonObject>>()
+    val cachePublicRooms = HashMap<String, List<JsonObject>>()
 
-    private suspend fun getPublicRooms(site: String): List<JsonObject> {
+    suspend fun getPublicRooms(site: String): List<JsonObject> {
         var list = cachePublicRooms[site]
         if (list == null) {
             list = ArrayList()
@@ -187,6 +235,9 @@ class Main(
     }
 
     suspend fun run() {
+        println("cacheDir=${cacheDir.canonicalPath}")
+        println("dataDir=${dataDir.canonicalPath}")
+
         // アクセストークンがなければログインする
         if (botAccessToken.isEmpty()) {
             val root = matrixApi(
@@ -198,6 +249,34 @@ class Main(
                 ?: error("login failed. $lastContent")
             println("login succeeded. token=$botAccessToken")
         }
+
+/*
+    admin api を呼び出す前に、DBを操作してログインユーザにadmin=1を設定したり、rate limitをオーバライドしたりする
+    $ psql -U matrix1 matrix1
+    \x
+    select * from users where name like '%tateisu%';
+    update users set admin=1 where name='@room-list-crawler:matrix.juggler.jp';
+    insert into ratelimit_override values ('@room-list-crawler:matrix.juggler.jp', 0, 0);
+*/
+//        var nextBatch :String? = null
+//        var roomCount = 0
+//        while(true){
+//            val form = jsonObject()
+//            nextBatch?.let{ form["from"]=it}
+//            val root = matrixApi(HttpMethod.Get,"/rooms",form=form,useAdminApi=true)
+//            val rooms = root.jsonArray("rooms")?.objectList()
+//            if(rooms!=null){
+//                roomCount += rooms.size
+//                for( room in rooms){
+//                    if( room.boolean("public")==true){
+//                        println("${room.string("canonical_alias") ?: room.string("room_id")} ${room.long("state_events")}")
+//                    }
+//                }
+//            }
+//            nextBatch = root.string("next_batch") ?: break
+//        }
+//        println("roomCount=$roomCount")
+//        return
 
         // rooms[room_id][via_server] = jsonobject
         val roomsMap = HashMap<String, HashMap<String, JsonObject>>()
@@ -214,16 +293,18 @@ class Main(
         }
 
         // 指定されたサーバリストを順に
+        val servers = HashSet<String>()
         config.servers.forEach { server ->
             getPublicRooms(server).forEach {
+                servers.add(server)
                 addRoom(it, server)
             }
         }
 
         // 指定されたルームリストを順に
-        val reRoom = """\A#([^#:!@]+):([^:]+)""".toRegex()
+        val extraServers = HashSet<String>()
         for (roomSpec in config.rooms) {
-            val gr = reRoom.find(roomSpec)?.groupValues ?: error("can't find room $roomSpec")
+            val gr = reRoomSpec.find(roomSpec)?.groupValues ?: error("can't find room $roomSpec")
             val site = gr[2]
             val root = matrixApi(
                 HttpMethod.Post,
@@ -238,6 +319,7 @@ class Main(
                 println("room $roomSpec not found! $lastContent")
             } else {
                 println("room $roomSpec found!")
+                extraServers.add(site)
                 addRoom(room, site)
             }
         }
@@ -247,10 +329,49 @@ class Main(
             .map { entry -> chooseRoomInfo(entry.key, entry.value) }
             .sortedByDescending { it.int("num_joined_members") }
 
+        val serverWebUi = JsonObject()
+
+        suspend fun getServerWebUI(server: String?): String {
+            server ?: return config.fallbackWebUI
+            serverWebUi.string(server)?.let { return it }
+            return if (server == "matrix.org") {
+                "https://app.element.io/"
+            } else {
+                val str = try {
+                    val checkUrl = "https://$server/"
+                    client2.get(checkUrl).let { res ->
+                        val location = res.headers[HttpHeaders.Location]
+                        println("$server $checkUrl res=${res.status} location=${location}")
+                        when {
+                            res.status == HttpStatusCode.OK -> "https://$server/"
+                            location == null -> config.fallbackWebUI
+                            location.startsWith("/") -> "https://$server$location"
+                            else -> location
+                        }
+                    }
+                } catch (ex: Throwable) {
+                    // connection problem?
+                    ex.printStackTrace()
+                    config.fallbackWebUI
+                }
+                if (str.endsWith("/")) str else "$str/"
+            }.also { result ->
+                serverWebUi[server] = result
+                println("getServerWebUI $server $result")
+            }
+        }
+
         // Webページでの表示に合わせた調整
         rooms.forEach { item ->
+            val roomAlias = item.string("canonical_alias")?.notEmpty() ?: item.string("room_id").notEmpty()!!
+            item["canonical_alias"] = roomAlias
+
+            val server = reRoomServer.find(roomAlias)?.groupValues?.elementAtOrNull(1)
+            item["linkWebUI"] = getServerWebUI(server) + "#/room/" + roomAlias
+
             item["world_readable_int"] = if (item.boolean("world_readable")!!) 1 else 0
             item["guest_can_join_int"] = if (item.boolean("guest_can_join")!!) 1 else 0
+
             getAvatarImage(item)
         }
 
@@ -277,34 +398,30 @@ class Main(
             }
         }
 
-        saveFile(dataFile, JsonArray(rooms).toString().encodeUtf8())
+        val tzTokyo = TimeZone.getTimeZone("Asia/Tokyo")!!
+        val c = Calendar.getInstance(tzTokyo)
+        val strNow =
+            "${c.get(Calendar.YEAR)}-${c.get(Calendar.MONTH) + 1}-${c.get(Calendar.DATE)}T${c.get(Calendar.HOUR_OF_DAY)}-${
+                c.get(Calendar.MINUTE)
+            }-${c.get(Calendar.SECOND)}JST"
+
+        val result = jsonObject {
+            put("updatedAt", strNow)
+            put("rooms", JsonArray(rooms))
+            put("servers", servers.sorted().toJsonArray())
+            put("extraServers", extraServers.sorted().toJsonArray())
+            put("serverWebUi", serverWebUi)
+        }
+
+        saveFile(dataFile, result.toString().encodeUtf8())
     }
 }
 
-fun main(args: Array<String>) {
-
+fun main(args: Array<String>) = runBlocking {
     config = parseConfig(args.firstOrNull() ?: "config.txt")
-    println("cacheDir=${cacheDir.canonicalPath}")
-    println("dataDir=${dataDir.canonicalPath}")
-
-    HttpClient {
-        // エラーレスポンスで例外を出さない
-        expectSuccess = false
-
-        install(UserAgent) {
-            agent = config.userAgent
-        }
-
-        install(HttpTimeout) {
-            val t = config.httpTimeoutMs
-            requestTimeoutMillis = t
-            connectTimeoutMillis = t
-            socketTimeoutMillis = t
-        }
-    }.use { client ->
-        runBlocking {
-            Main(client).run()
+    createHttpClient().use { client ->
+        createHttpClient { followRedirects = false }.use { client2 ->
+            Main(client, client2).run()
         }
     }
 }
-

@@ -11,19 +11,22 @@ class Config(
     var userAgent: String = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.72 Safari/537.36",
 
     var botServerPrefix: String = "https://matrix.juggler.jp/_matrix/client/r0",
-    var mediaPrefix :String ="https://matrix.juggler.jp/_matrix/media/r0/download/",
+    var adminApiPrefix: String = "https://matrix.juggler.jp/_synapse/admin/v1",
+    var mediaPrefix: String = "https://matrix.juggler.jp/_matrix/media/r0/download/",
 
     var botUser: String = "(not specified)",
     var botPassword: String = "(not specified)",
 
-    var botAccessToken :String ="",
+    var botAccessToken: String = "",
 
     var cacheExpireHours: Int = 1,
     var httpTimeoutMs: Long = 30000,
-    var cacheDir :String = "cache",
-    var outputDir:String = "web/public",
-    var dumpRooms:Boolean = false,
-){
+    var cacheDir: String = "cache",
+    var outputDir: String = "web/public",
+    var dumpRooms: Boolean = false,
+
+    var fallbackWebUI: String = "https://matrix-element.juggler.jp/",
+) {
     val servers = TreeSet<String>()
     val rooms = TreeSet<String>()
 }
@@ -49,14 +52,15 @@ fun parseConfig(filePath: String): Config {
             "mediaPrefix" -> dst.mediaPrefix = value
             "botUser" -> dst.botUser = value
             "botPassword" -> dst.botPassword = value
-            "botAccessToken"-> dst.botAccessToken = value
+            "botAccessToken" -> dst.botAccessToken = value
             "cacheExpireHours" -> dst.cacheExpireHours = value.toInt()
             "httpTimeoutMs" -> dst.httpTimeoutMs = value.toLong()
             "cacheDir" -> dst.cacheDir = value
             "outputDir" -> dst.outputDir = value
-            "server" -> dst.servers.add( value)
-            "room" -> dst.rooms.add( value)
+            "server" -> dst.servers.add(value)
+            "room" -> dst.rooms.add(value)
             "dumpRooms" -> dst.dumpRooms = value.isTruth()
+            "fallbackWebUI" -> dst.fallbackWebUI = value
             else -> error("unsupported config name: $name")
         }
     }
