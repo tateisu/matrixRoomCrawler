@@ -40,7 +40,7 @@ test {
     useJUnitPlatform()
 }
 
-def nameMainClass = 'crawler.MainKt'
+def nameMainClass = 'crawler.MatrixRoomCrawlerKt'
 
 jar {
     //noinspection GroovyAssignabilityCheck

@@ -36,14 +36,13 @@ import java.util.*
 import javax.imageio.ImageIO
 import kotlin.collections.set
 
-lateinit var config: Config
+val config = Config()
 
 val verbose by lazy { config.verbose }
 val cacheDir by lazy { File("cache").apply { mkdirs() } }
 val dataDir by lazy { File("web/public").apply { mkdirs() } }
 val mediaDir by lazy { File(dataDir, "avatar").apply { mkdirs() } }
 val dataFile by lazy { File(dataDir, "data.json") }
-
 
 fun createHttpClient(block: HttpClientConfig<*>.() -> Unit = {}) =
     HttpClient {
@@ -88,7 +87,7 @@ fun BufferedImage.resize(w: Int, h: Int): BufferedImage =
 
 val reRoomSpec = """\A#([^#:!@]+):([^:]+)""".toRegex()
 
-class Main(
+class MatrixRoomCrawler(
     val client: HttpClient,
     val client2: HttpClient,
 ) {
@@ -112,13 +111,13 @@ class Main(
             headers["Authorization"] = "Bearer $botAccessToken"
         }
 
-
         lastContent = when (method) {
             HttpMethod.Get -> {
                 if (form?.isNotEmpty() == true)
                     url = "$url${if (url.any { it == '?' }) "&" else "?"}${form.encodeQuery()}"
                 client.cachedGetString(cacheDir, url, headers)
             }
+
             HttpMethod.Post -> {
                 showUrl(method, url)
                 client.submitForm()
@@ -129,6 +128,7 @@ class Main(
                     setBody(form?.toString()?.encodeUtf8() ?: ByteArray(0))
                 }.getContentString()
             }
+
             else -> error("matrixApi: unsupported http method $method")
         }
         return lastContent.decodeJsonObject()
@@ -178,14 +178,13 @@ class Main(
         val fromUrl = "${config.mediaPrefix}${site}/${code}"
 
         val bytes = try {
-            client.cachedGetBytes(cacheDir, fromUrl, silent = true)
+            client.cachedGetBytes(cacheDir, fromUrl)
         } catch (ex: Throwable) {
             println(ex.message)
             return
         }
 
         val image1 = ByteArrayInputStream(bytes).use {
-            @Suppress("BlockingMethodInNonBlockingContext")
             ImageIO.read(it)
         }
         if (image1 == null) {
@@ -197,7 +196,6 @@ class Main(
             ImageIO.write(image1.resize(64, 64), "png", saveFile)
         }
     }
-
 
     val cachePublicRooms = HashMap<String, List<JsonObject>>()
 
@@ -222,11 +220,12 @@ class Main(
                     throw ex
                 }
 
-                if (pageToken.isEmpty())
+                if (verbose && pageToken.isEmpty()){
                     println("$site total_room_count_estimate=${root.long("total_room_count_estimate")}")
+                }
 
                 val chunk = root.jsonArray("chunk")!!.objectList()
-                println("$site list.size=${chunk.size}")
+                if(verbose) println("$site list.size=${chunk.size}")
                 list.addAll(chunk)
                 pageToken = root.string("next_batch").notEmpty() ?: break
             }
@@ -235,8 +234,8 @@ class Main(
     }
 
     suspend fun run() {
-        println("cacheDir=${cacheDir.canonicalPath}")
-        println("dataDir=${dataDir.canonicalPath}")
+        if (verbose) println("cacheDir=${cacheDir.canonicalPath}")
+        if (verbose) println("dataDir=${dataDir.canonicalPath}")
 
         // アクセストークンがなければログインする
         if (botAccessToken.isEmpty()) {
@@ -247,17 +246,17 @@ class Main(
             )
             botAccessToken = root.string("access_token").notEmpty()
                 ?: error("login failed. $lastContent")
-            println("login succeeded. token=$botAccessToken")
+            if (verbose) println("login succeeded. token=$botAccessToken")
         }
 
-/*
-    admin api を呼び出す前に、DBを操作してログインユーザにadmin=1を設定したり、rate limitをオーバライドしたりする
-    $ psql -U matrix1 matrix1
-    \x
-    select * from users where name like '%tateisu%';
-    update users set admin=1 where name='@room-list-crawler:matrix.juggler.jp';
-    insert into ratelimit_override values ('@room-list-crawler:matrix.juggler.jp', 0, 0);
-*/
+        /*
+            admin api を呼び出す前に、DBを操作してログインユーザにadmin=1を設定したり、rate limitをオーバライドしたりする
+            $ psql -U matrix1 matrix1
+            \x
+            select * from users where name like '%tateisu%';
+            update users set admin=1 where name='@room-list-crawler:matrix.juggler.jp';
+            insert into ratelimit_override values ('@room-list-crawler:matrix.juggler.jp', 0, 0);
+        */
 //        var nextBatch :String? = null
 //        var roomCount = 0
 //        while(true){
@@ -280,6 +279,7 @@ class Main(
 
         // rooms[room_id][via_server] = jsonobject
         val roomsMap = HashMap<String, HashMap<String, JsonObject>>()
+
         fun addRoom(room: JsonObject, viaServer: String) {
             val roomId = room.string("room_id")
                 ?.notEmpty() ?: return
@@ -304,7 +304,8 @@ class Main(
         // 指定されたルームリストを順に
         val extraServers = HashSet<String>()
         for (roomSpec in config.rooms) {
-            val gr = reRoomSpec.find(roomSpec)?.groupValues ?: error("can't find room $roomSpec")
+            val gr = reRoomSpec.find(roomSpec)?.groupValues
+                ?: error("can't find room $roomSpec")
             val site = gr[2]
             val root = matrixApi(
                 HttpMethod.Post,
@@ -314,11 +315,12 @@ class Main(
                     "filter" to jsonObject("generic_search_term" to roomSpec)
                 )
             )
-            val room = root.jsonArray("chunk")?.objectList()?.find { it.string("canonical_alias") == roomSpec }
+            val room = root.jsonArray("chunk")?.objectList()
+                ?.find { it.string("canonical_alias") == roomSpec }
             if (room == null) {
-                println("room $roomSpec not found! $lastContent")
+                if(verbose) println("room $roomSpec not found! $lastContent")
             } else {
-                println("room $roomSpec found!")
+                if(verbose) println("room $roomSpec found!")
                 extraServers.add(site)
                 addRoom(room, site)
             }
@@ -341,7 +343,7 @@ class Main(
                     val checkUrl = "https://$server/"
                     client2.get(checkUrl).let { res ->
                         val location = res.headers[HttpHeaders.Location]
-                        println("$server $checkUrl res=${res.status} location=${location}")
+                        if(verbose)   println("$server $checkUrl res=${res.status} location=${location}")
                         when {
                             res.status == HttpStatusCode.OK -> "https://$server/"
                             location == null -> config.fallbackWebUI
@@ -357,7 +359,7 @@ class Main(
                 if (str.endsWith("/")) str else "$str/"
             }.also { result ->
                 serverWebUi[server] = result
-                println("getServerWebUI $server $result")
+                if(verbose)  println("getServerWebUI $server $result")
             }
         }
 
@@ -418,10 +420,13 @@ class Main(
 }
 
 fun main(args: Array<String>) = runBlocking {
-    config = parseConfig(args.firstOrNull() ?: "config.txt")
-    createHttpClient().use { client ->
+    config.parseArgs(args, "config.txt")
+    if (verbose) {
+        println("${MatrixRoomCrawler::class.java.simpleName} verbose=$verbose")
+    }
+    createHttpClient().use { client1 ->
         createHttpClient { followRedirects = false }.use { client2 ->
-            Main(client, client2).run()
+            MatrixRoomCrawler(client1, client2).run()
         }
     }
 }

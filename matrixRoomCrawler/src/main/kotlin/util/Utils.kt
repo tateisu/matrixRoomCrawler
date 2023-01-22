@@ -176,7 +176,7 @@ fun String.sanitizeFileChars() = reFileNameBadChars.replace(this, "-")
 private val reAccessToken = """access_token=[^&]+""".toRegex()
 fun String.hideAccessToken() = replace(reAccessToken, "access_token=xxx")
 fun showUrl(method: HttpMethod, url: String) {
-    println("${method.value} ${url.hideAccessToken()}")
+    if(verbose) println("${method.value} ${url.hideAccessToken()}")
 }
 
 fun clearCache(cacheDir: File) {
@@ -191,16 +191,15 @@ private val cacheExpire by lazy { config.cacheExpireHours.toLong() * 3600000L }
 suspend fun HttpClient.cachedGetBytes(
     cacheDir: File,
     url: String,
-    headers: Map<String, String> = HashMap(),
-    silent: Boolean = false
+    headers: Map<String, String> = HashMap()
 ): ByteArray {
     val cacheFile = File(cacheDir, url.hideAccessToken().sanitizeFileChars())
     if (System.currentTimeMillis() - cacheFile.lastModified() <= cacheExpire) {
-        if (!silent) println("GET(cached) ${url.hideAccessToken()}")
+        if (verbose) println("GET(cached) ${url.hideAccessToken()}")
         return loadFile(cacheFile)
     }
 
-    if (!silent) showUrl(HttpMethod.Get, url)
+    showUrl(HttpMethod.Get, url)
 
     return get(url) {
         headers.entries.forEach {
