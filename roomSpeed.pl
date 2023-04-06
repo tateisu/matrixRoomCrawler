@@ -19,7 +19,7 @@ my $verbose =0;
 GetOptions(
 	"envFile=s" => \$envFile,
 	"outFile=s" => \$outFile,
-	"verbose:+" => $verbose,
+	"verbose|v:+" => \$verbose,
 ) or die("usage: $0 --envFile={path} -v\n");
 
 ############################################
@@ -41,9 +41,9 @@ $ENV{OUT_FILE} and $outFile = $ENV{OUT_FILE};
 
 $verbose and say "db: host=$ENV{DB_HOST} port=$ENV{DB_PORT} name=$ENV{DB_NAME} user=$ENV{DB_USER} pass=***";
 my $dbh = DBI->connect(
-	"dbi:Pg:dbname=$ENV{DB_NAME};host=$ENV{DB_HOST};port=$ENV{DB_PORT}", 
-	$ENV{DB_USER}, 
-	$ENV{DB_PASS}
+    "dbi:Pg:dbname=$ENV{DB_NAME};host=$ENV{DB_HOST};port=$ENV{DB_PORT}", 
+    $ENV{DB_USER}, 
+    $ENV{DB_PASS}
 ) or die $DBI::errstr;
 
 my $data = $dbh->selectall_arrayref(
@@ -54,8 +54,8 @@ order by speed desc;");
 
 my %map;
 for(@$data){
-	my($speed,$alias)=@$_;
-	$alias and $map{$alias}=$speed;
+    my($speed,$alias)=@$_;
+    $alias and $map{$alias}=$speed;
 }
 
 $dbh->disconnect;
@@ -68,10 +68,10 @@ my $bytes = $json->encode(\%map);
 
 my $tmpFile = "$outFile.tmp$$";
 eval{
-	open(my $fh,">:raw",$tmpFile) or die "$tmpFile $!";
-	print $fh $bytes;
-	close($fh) or die "$tmpFile $!";
-	rename($tmpFile,$outFile) or die "$outFile $!";
+    open(my $fh,">:raw",$tmpFile) or die "$tmpFile $!";
+    print $fh $bytes;
+    close($fh) or die "$tmpFile $!";
+    rename($tmpFile,$outFile) or die "$outFile $!";
 };
 unlink $tmpFile;
 $@ and die $@;
