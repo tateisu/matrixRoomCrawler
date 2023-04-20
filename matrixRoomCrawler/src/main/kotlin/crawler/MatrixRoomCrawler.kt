@@ -4,6 +4,7 @@ package crawler
 
 import io.ktor.client.HttpClient
 import io.ktor.client.HttpClientConfig
+import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.UserAgent
 import io.ktor.client.request.forms.submitForm
@@ -14,7 +15,9 @@ import io.ktor.client.request.setBody
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import util.ApiError
 import util.JsonArray
 import util.JsonObject
 import util.cachedGetBytes
@@ -111,36 +114,78 @@ class MatrixRoomCrawler(
             headers["Authorization"] = "Bearer $botAccessToken"
         }
 
-        lastContent = when (method) {
-            HttpMethod.Get -> {
-                if (form?.isNotEmpty() == true)
-                    url = "$url${if (url.any { it == '?' }) "&" else "?"}${form.encodeQuery()}"
-                client.cachedGetString(cacheDir, url, headers)
-            }
+        var lastError: Throwable? = null
+        for (retryRemain in (0 until 3).reversed()) {
+            try {
+                lastContent = when (method) {
+                    HttpMethod.Get -> {
+                        if (form?.isNotEmpty() == true)
+                            url = "$url${if (url.any { it == '?' }) "&" else "?"}${form.encodeQuery()}"
+                        client.cachedGetString(cacheDir, url, headers)
+                    }
 
-            HttpMethod.Post -> {
-                showUrl(method, url)
-                client.submitForm()
-                client.request(url) {
-                    this.method = method
-                    header("Content-Type", "application/json")
-                    headers.entries.forEach { header(it.key, it.value) }
-                    setBody(form?.toString()?.encodeUtf8() ?: ByteArray(0))
-                }.getContentString()
-            }
+                    HttpMethod.Post -> {
+                        showUrl(method, url)
+                        client.submitForm()
+                        client.request(url) {
+                            this.method = method
+                            header("Content-Type", "application/json")
+                            headers.entries.forEach { header(it.key, it.value) }
+                            setBody(form?.toString()?.encodeUtf8() ?: ByteArray(0))
+                        }.getContentString()
+                    }
 
-            else -> error("matrixApi: unsupported http method $method")
+                    else -> error("matrixApi: unsupported http method $method")
+                }
+                return lastContent.decodeJsonObject()
+            } catch (ex: Throwable) {
+                when (ex) {
+                    is HttpRequestTimeoutException ->
+                        error("matrixApi: timeout. $method $url")
+
+                    is ApiError -> {
+                        when ((ex as? ApiError)?.response?.status?.value) {
+                            in 500 until 599 -> {
+                                if (retryRemain > 0) {
+                                    println("一時的エラー。リトライします ${ex.message}")
+                                }
+                                lastError = ex
+                                delay(3000L)
+                                continue
+                            }
+
+                            else -> throw ex
+                        }
+                    }
+
+                    else -> throw ex
+                }
+            }
         }
-        return lastContent.decodeJsonObject()
+        throw lastError!!
     }
 
-    fun chooseRoomInfo(roomId: String, map2: HashMap<String, JsonObject>): JsonObject {
-        if (map2.size == 1) return map2.values.first()
-        val roomServer = """:([^:]+)\z""".toRegex().find(roomId)?.groupValues?.elementAtOrNull(1)
-        if (roomServer != null) {
-            map2.entries.find { it.key == roomServer }?.let { return it.value }
-        }
-        return map2.values.first()
+    val reServerInId = """:([^:]+)\z""".toRegex()
+
+    fun chooseRoomInfo(roomId: String, map2: HashMap<String, JsonObject>): JsonObject? {
+        val viaServers = map2.keys.joinToString(",")
+        val roomName = map2.values.firstOrNull()?.string("name")
+        val primaryServer = reServerInId.find(roomId)?.groupValues?.elementAtOrNull(1)
+        return when {
+            primaryServer.isNullOrEmpty() -> {
+                println("$roomId does not contain server name.")
+                null
+            }
+
+            else -> when (val roomOnPrimaryServer = map2[primaryServer]) {
+                null -> {
+                    if (verbose) println("$roomName $roomId is not listed on $primaryServer, but listed via $viaServers")
+                    null
+                }
+
+                else -> roomOnPrimaryServer
+            }
+        }?.apply { put("viaServers", viaServers) }
     }
 
     val ignoreServers = setOf(
@@ -220,12 +265,12 @@ class MatrixRoomCrawler(
                     throw ex
                 }
 
-                if (verbose && pageToken.isEmpty()){
+                if (verbose && pageToken.isEmpty()) {
                     println("$site total_room_count_estimate=${root.long("total_room_count_estimate")}")
                 }
 
                 val chunk = root.jsonArray("chunk")!!.objectList()
-                if(verbose) println("$site list.size=${chunk.size}")
+                if (verbose) println("$site list.size=${chunk.size}")
                 list.addAll(chunk)
                 pageToken = root.string("next_batch").notEmpty() ?: break
             }
@@ -284,12 +329,7 @@ class MatrixRoomCrawler(
             val roomId = room.string("room_id")
                 ?.notEmpty() ?: return
 
-            var map2 = roomsMap[roomId]
-            if (map2 == null) {
-                map2 = HashMap()
-                roomsMap[roomId] = map2
-            }
-            map2[viaServer] = room
+            roomsMap.getOrPut(roomId) { HashMap() }[viaServer] = room
         }
 
         // 指定されたサーバリストを順に
@@ -318,17 +358,18 @@ class MatrixRoomCrawler(
             val room = root.jsonArray("chunk")?.objectList()
                 ?.find { it.string("canonical_alias") == roomSpec }
             if (room == null) {
-                if(verbose) println("room $roomSpec not found! $lastContent")
+                if (verbose) println("room $roomSpec not found! $lastContent")
             } else {
-                if(verbose) println("room $roomSpec found!")
+                if (verbose) println("room $roomSpec found!")
                 extraServers.add(site)
+                room["fromExplicitRoomList"] = true
                 addRoom(room, site)
             }
         }
 
         // ある部屋を複数のサーバで見かけたなら重複しないようにする
         val rooms = roomsMap.entries
-            .map { entry -> chooseRoomInfo(entry.key, entry.value) }
+            .mapNotNull { entry -> chooseRoomInfo(entry.key, entry.value) }
             .sortedByDescending { it.int("num_joined_members") }
 
         val serverWebUi = JsonObject()
@@ -339,11 +380,11 @@ class MatrixRoomCrawler(
             return if (server == "matrix.org") {
                 "https://app.element.io/"
             } else {
+                val checkUrl = "https://$server/"
                 val str = try {
-                    val checkUrl = "https://$server/"
                     client2.get(checkUrl).let { res ->
                         val location = res.headers[HttpHeaders.Location]
-                        if(verbose)   println("$server $checkUrl res=${res.status} location=${location}")
+                        if (verbose) println("$server $checkUrl res=${res.status} location=${location}")
                         when {
                             res.status == HttpStatusCode.OK -> "https://$server/"
                             location == null -> config.fallbackWebUI
@@ -353,13 +394,13 @@ class MatrixRoomCrawler(
                     }
                 } catch (ex: Throwable) {
                     // connection problem?
-                    ex.printStackTrace()
+                    println("getServerWebUI failed. fallback to ${config.fallbackWebUI}. checkUrl=$checkUrl error=${ex::class.java.simpleName} ${ex.message}")
                     config.fallbackWebUI
                 }
                 if (str.endsWith("/")) str else "$str/"
             }.also { result ->
                 serverWebUi[server] = result
-                if(verbose)  println("getServerWebUI $server $result")
+                if (verbose) println("getServerWebUI $server $result")
             }
         }
 

@@ -1,11 +1,11 @@
 plugins {
     id "java"
-    id 'org.jetbrains.kotlin.jvm' version '1.6.20'
     id "com.github.johnrengelman.shadow" version "7.1.2"
+    id "org.jetbrains.kotlin.jvm" version "1.8.20"
 }
 
-group 'org.example'
-version '1.0-SNAPSHOT'
+group "org.example"
+version "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
@@ -14,37 +14,41 @@ repositories {
 }
 
 dependencies {
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.2'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+    testImplementation "org.junit.jupiter:junit-jupiter-api:5.8.2"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine"
 
     implementation "org.jetbrains.kotlin:kotlin-util-io"
     implementation "org.jetbrains.kotlin:kotlin-reflect"
 
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.6.1'
-    implementation 'org.jetbrains.kotlinx:kotlinx-cli:0.3.4'
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-jdk8:1.6.1"
+    implementation "org.jetbrains.kotlinx:kotlinx-cli:0.3.4"
 
-    def ktor_version = "2.0.0"
+    def ktor_version = "2.3.0"
     implementation "io.ktor:ktor-client-core:$ktor_version"
     implementation "io.ktor:ktor-client-cio:$ktor_version"
     implementation "io.ktor:ktor-client-encoding:$ktor_version"
 //    implementation "io.ktor:ktor-client-features:$ktor_version"
 
     // StringEscapeUtils.unescapeHtml4
-    implementation "org.apache.commons:commons-text:1.9"
+    implementation "org.apache.commons:commons-text:1.10.0"
 
     // HTML5パーサ
-    implementation 'org.jsoup:jsoup:1.14.3'
+    implementation "org.jsoup:jsoup:1.15.3"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8"
 }
 
 test {
     useJUnitPlatform()
 }
 
-def nameMainClass = 'crawler.MatrixRoomCrawlerKt'
+def nameMainClass = "crawler.MatrixRoomCrawlerKt"
 
 jar {
     //noinspection GroovyAssignabilityCheck
     manifest {
         attributes "Main-Class": "$nameMainClass"
     }
+}
+kotlin {
+    jvmToolchain(11)
 }

@@ -45,7 +45,7 @@ fun CharSequence.eachCodePoint(block: (Int) -> Unit) {
                 continue
             }
         }
-		block(c1.code)
+        block(c1.code)
     }
 }
 
@@ -79,9 +79,9 @@ private val encodePercentSkipChars by lazy {
         ('0'..'9').forEach { add(it.code) }
         ('A'..'Z').forEach { add(it.code) }
         ('a'..'z').forEach { add(it.code) }
-		add('-'.code)
-		add('_'.code)
-		add('.'.code)
+        add('-'.code)
+        add('_'.code)
+        add('.'.code)
     }
 }
 
@@ -169,14 +169,13 @@ fun saveFile(file: File, data: ByteArray) {
     if (!tmpFile.renameTo(file)) error("$file: rename failed.")
 }
 
-
 private val reFileNameBadChars = """[\\/:*?"<>|-]+""".toRegex()
 fun String.sanitizeFileChars() = reFileNameBadChars.replace(this, "-")
 
 private val reAccessToken = """access_token=[^&]+""".toRegex()
 fun String.hideAccessToken() = replace(reAccessToken, "access_token=xxx")
 fun showUrl(method: HttpMethod, url: String) {
-    if(verbose) println("${method.value} ${url.hideAccessToken()}")
+    if (verbose) println("${method.value} ${url.hideAccessToken()}")
 }
 
 fun clearCache(cacheDir: File) {
@@ -191,7 +190,7 @@ private val cacheExpire by lazy { config.cacheExpireHours.toLong() * 3600000L }
 suspend fun HttpClient.cachedGetBytes(
     cacheDir: File,
     url: String,
-    headers: Map<String, String> = HashMap()
+    headers: Map<String, String> = HashMap(),
 ): ByteArray {
     val cacheFile = File(cacheDir, url.hideAccessToken().sanitizeFileChars())
     if (System.currentTimeMillis() - cacheFile.lastModified() <= cacheExpire) {
@@ -209,6 +208,7 @@ suspend fun HttpClient.cachedGetBytes(
         when (res.status) {
             HttpStatusCode.OK ->
                 res.readBytes().also { saveFile(cacheFile, it) }
+
             else -> {
                 cacheFile.delete()
                 error("get failed. ${url.hideAccessToken()} ${res.status}")
@@ -216,6 +216,12 @@ suspend fun HttpClient.cachedGetBytes(
         }
     }
 }
+
+class ApiError(
+    val response: HttpResponse,
+    message: String,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)
 
 suspend fun HttpResponse.getContentString(): String {
     var content = try {
@@ -228,10 +234,14 @@ suspend fun HttpResponse.getContentString(): String {
         HttpStatusCode.OK -> content!!
         else -> {
             try {
-                content?.decodeJsonObject()?.string("error")?.notEmpty()?.let { content = it }
+                content?.decodeJsonObject()?.string("error")
+                    ?.notEmpty()?.let { content = it }
             } catch (_: Throwable) {
             }
-            error("request failed. $status ${request.method} ${request.url} $content")
+            throw ApiError(
+                this,
+                "request failed. $status ${request.method} ${request.url} $content",
+            )
         }
     }
 }
@@ -251,9 +261,9 @@ suspend fun HttpResponse.getContentBytes(): ByteArray {
                 var sv = content?.decodeUtf8()
                 try {
                     sv?.decodeJsonObject()
-						?.string("error")
-						?.notEmpty()
-						?.let { sv = it }
+                        ?.string("error")
+                        ?.notEmpty()
+                        ?.let { sv = it }
                 } catch (ignored: Throwable) {
                 }
                 error("request failed. $status ${request.method} ${request.url} content=$sv")
@@ -263,7 +273,6 @@ suspend fun HttpResponse.getContentBytes(): ByteArray {
         }
     }
 }
-
 
 suspend fun HttpClient.cachedGetString(cacheDir: File, url: String, headers: Map<String, String> = HashMap()): String =
     cachedGetBytes(cacheDir, url, headers).decodeUtf8()
