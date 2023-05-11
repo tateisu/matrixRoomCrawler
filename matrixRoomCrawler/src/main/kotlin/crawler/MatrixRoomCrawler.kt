@@ -140,22 +140,26 @@ class MatrixRoomCrawler(
                 return lastContent.decodeJsonObject()
             } catch (ex: Throwable) {
                 when (ex) {
-                    is HttpRequestTimeoutException ->
-                        error("matrixApi: timeout. $method $url")
-
-                    is ApiError -> {
-                        when ((ex as? ApiError)?.response?.status?.value) {
-                            in 500 until 599 -> {
-                                if (retryRemain > 0) {
-                                    println("一時的エラー。リトライします ${ex.message}")
-                                }
-                                lastError = ex
-                                delay(3000L)
-                                continue
-                            }
-
-                            else -> throw ex
+                    is HttpRequestTimeoutException -> {
+                        if (retryRemain > 0) {
+                            println("matrixApi:タイムアウト。リトライします ${ex.message}")
                         }
+                        lastError = IllegalStateException("matrixApi: timeout. $method $url")
+                        delay(3000L)
+                        continue
+                    }
+
+                    is ApiError -> when (ex.response.status.value) {
+                        in 500 until 599 -> {
+                            if (retryRemain > 0) {
+                                println("一時的エラー。リトライします ${ex.message}")
+                            }
+                            lastError = ex
+                            delay(3000L)
+                            continue
+                        }
+
+                        else -> throw ex
                     }
 
                     else -> throw ex
@@ -258,11 +262,17 @@ class MatrixRoomCrawler(
                 val root = try {
                     matrixApi(HttpMethod.Get, "/publicRooms", params)
                 } catch (ex: Throwable) {
-                    if (ex.message?.startsWith("get failed. ") == true) {
-                        println(ex.message)
-                        break
+                    val message = ex.message ?: ""
+                    when {
+                        message.startsWith("get failed. ") ||
+                                message.contains("timeout")
+                        -> {
+                            println(ex.message)
+                            break
+                        }
+
+                        else -> throw ex
                     }
-                    throw ex
                 }
 
                 if (verbose && pageToken.isEmpty()) {

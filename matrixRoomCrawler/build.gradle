@@ -27,10 +27,12 @@ dependencies {
     implementation "io.ktor:ktor-client-core:$ktor_version"
     implementation "io.ktor:ktor-client-cio:$ktor_version"
     implementation "io.ktor:ktor-client-encoding:$ktor_version"
-//    implementation "io.ktor:ktor-client-features:$ktor_version"
 
     // StringEscapeUtils.unescapeHtml4
     implementation "org.apache.commons:commons-text:1.10.0"
+
+    // 警告抑止 SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+    implementation "org.slf4j:slf4j-simple:2.0.7"
 
     // HTML5パーサ
     implementation "org.jsoup:jsoup:1.15.3"
