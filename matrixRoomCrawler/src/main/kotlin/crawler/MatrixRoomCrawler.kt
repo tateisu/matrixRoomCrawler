@@ -114,8 +114,9 @@ class MatrixRoomCrawler(
             headers["Authorization"] = "Bearer $botAccessToken"
         }
 
+        val tryMax = 3
         var lastError: Throwable? = null
-        for (retryRemain in (0 until 3).reversed()) {
+        for (retryRemain in (0 until tryMax).reversed()) {
             try {
                 lastContent = when (method) {
                     HttpMethod.Get -> {
@@ -141,10 +142,10 @@ class MatrixRoomCrawler(
             } catch (ex: Throwable) {
                 when (ex) {
                     is HttpRequestTimeoutException -> {
-                        if (retryRemain > 0) {
+                        if (retryRemain > 0 && verbose) {
                             println("matrixApi:タイムアウト。リトライします ${ex.message}")
                         }
-                        lastError = IllegalStateException("matrixApi: timeout. $method $url")
+                        lastError = IllegalStateException("matrixApi: timeout. tryMax=$tryMax $method $url")
                         delay(3000L)
                         continue
                     }

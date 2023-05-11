@@ -5,6 +5,7 @@ import util.isTruth
 import java.io.File
 import java.io.FileInputStream
 import java.util.*
+import java.util.concurrent.TimeUnit
 
 class Config(
     var verbose: Boolean = false,
@@ -20,7 +21,7 @@ class Config(
     var botAccessToken: String = "",
 
     var cacheExpireHours: Int = 1,
-    var httpTimeoutMs: Long = 30000,
+    var httpTimeoutMs: Long = TimeUnit.SECONDS.toMillis(300L),
     var cacheDir: String = "cache",
     var outputDir: String = "web/public",
     var dumpRooms: Boolean = false,
